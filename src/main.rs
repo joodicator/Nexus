@@ -1,4 +1,5 @@
-use untitled::derive_crosscast;
+#[macro_use]
+extern crate untitled;
 
 fn main() {
 }
@@ -8,8 +9,8 @@ trait Message { fn text(&self) -> &dyn Text; }
 
 struct PlainText { text: String }
 impl Text for PlainText { fn str(&self) -> &str { &*self.text } }
-derive_crosscast!(PlainText, base_traits(Text));
+DynCast!(PlainText, base_traits(Text));
 
 struct TextMessage { text: PlainText }
 impl Message for TextMessage { fn text(&self) -> &dyn Text { &self.text } }
-
+DynCast!(TextMessage, base_traits(Message));

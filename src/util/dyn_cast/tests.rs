@@ -21,7 +21,7 @@ macro_rules! test_cast_borrowed_any {
     ($value:ident, $cast:ident, $Struct:ident, types($($type:ty,)*)) => {$(
         assert!($value.can_cast::<$type>());
         assert_eq!($value.$cast::<$type>().map(|a| (*a).type_id()),
-                   Some(TypeId::of::<Struct>()));
+                   Some(TypeId::of::<$Struct>()));
     )*};
 }
 
@@ -46,7 +46,7 @@ macro_rules! test_cast_owned_any {
         let struct_ptr = $Ptr::new($Struct) as $Ptr<dyn DynCast>;
         assert!(struct_ptr.can_cast::<$type>());
         assert_eq!(struct_ptr.$cast::<$type>().ok().map(|a| (*a).type_id()),
-                   Some(TypeId::of::<Struct>()));
+                   Some(TypeId::of::<$Struct>()));
     )*};
 }
 
@@ -137,4 +137,20 @@ fn derive_dyncast_minimal() {
     let struct_arc = Arc::new(Struct) as Arc<dyn DynCast>;
     assert!(struct_arc.can_cast::<dyn Any>());
     assert!(struct_arc.cast_arc::<dyn Any>().is_err());
+}
+
+#[test]
+fn derive_dyncast_custom() {
+    trait Trait {}
+    struct Struct;
+    impl Trait for Struct {}
+    DynCast!(Struct, base_traits(Trait), auto_traits(Unpin));
+ 
+    let struct_ref = &Struct as &dyn DynCast;
+    test_not_cast_borrowed!(struct_ref, cast_ref, Struct, types(
+        dyn Any + Send, dyn Any + Sync, dyn Trait + Send, dyn Trait + Sync,
+    ));
+    test_cast_borrowed!(struct_ref, cast_ref, Struct, types(
+        dyn Trait, dyn Trait + Unpin, dyn Any, dyn Any + Unpin, 
+    ));
 }

@@ -173,5 +173,8 @@ macro_rules! DynCast {
             }
         }
     };
+}
 
+macro_rules! doc {
+    ($($x:expr)*; $i:item) => { $(#[doc=$x])* $i };
 }

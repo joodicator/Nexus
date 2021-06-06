@@ -4,7 +4,6 @@ use std::any::{Any, TypeId};
 use std::{rc::Rc, sync::Arc};
 use std::marker::{Sync, Send};
 
-#[macro_use]
 mod macros;
 mod tests;
 

@@ -1,3 +1,98 @@
+//! Macros associated with `dyn_cast` that might be used in other modules.
+
+/// Derives an instance of the [`DynCast`] trait.
+///
+/// # Usage
+/// ```text
+/// DynCast!(ImplType, base_traits(B1, B2, ..., Bm), auto_traits(A1, A2, ..., An));
+/// ```
+/// or
+/// ```text
+/// DynCast!(ImplType, base_traits(B1, B2, ..., Bm));
+/// ```
+/// where:
+/// * `ImplType` is a type, usually the name of a `struct` or `enum`.
+/// * Each `Bi` is a trait implemented by `ImplType` usable as the *base trait*
+///   of a [trait object], **except** for [`DynCast`] or [`Any`].
+/// * Each `Aj` is an [auto trait] implemented by `ImplType`. Auto traits must
+///   be specified by one of the identifiers `Send`, `Sync`, `Unpin`,
+///   `UnwindSafe`, or `RefUnwindsafe`: paths or type aliases are not accepted,
+///   and these identifiers refer to the standard traits they name regardless
+///   of what is in scope at the call site.
+///   
+///   If the `auto_traits` key is not specified, it defaults to
+///   `auto_traits(Send, Sync)`.
+///
+/// An invocation of this macro in Item position subject to the above will attempt
+/// to generate an implementation `impl DynCast for ImplType { ... }` declaring
+/// `ImplType` to be *castable to* exactly the following types:
+/// * `ImplType` itself.
+/// * Any trait object formed by combining:
+///   * exactly one of `Any`, `DynCast` or one of the given base traits `Bi`, with
+///   * zero or more of the given (or chosen by default) auto traits `Aj`.
+///
+/// # Examples
+/// ## 1. Possible combinations of base and auto traits
+/// ```
+/// # use std::{marker::Unpin, any::Any};
+/// use untitled::util::dyn_cast::{DynCast, DynCastExt};
+/// use untitled::DynCast; // this macro
+/// 
+/// struct Struct1 { /* ... */ }
+/// trait Trait1 { /* ... */ }
+/// trait Trait2 { /* ... */ }
+/// impl Trait1 for Struct1 { /* ... */ }
+/// DynCast!(Struct1, base_traits(Trait1), auto_traits(Send, Unpin));
+///
+/// let obj = &(Struct1 {/* ... */}) as &dyn DynCast;
+///
+/// // `obj` can be cast to the following 13 types:
+/// assert!(obj.can_cast::<Struct1>());
+/// assert!(obj.can_cast::<dyn Trait1>());
+/// assert!(obj.can_cast::<dyn Trait1 + Send>());
+/// assert!(obj.can_cast::<dyn Trait1 + Unpin>());
+/// assert!(obj.can_cast::<dyn Trait1 + Send + Unpin>());
+/// assert!(obj.can_cast::<dyn DynCast>());
+/// assert!(obj.can_cast::<dyn DynCast + Send>());
+/// assert!(obj.can_cast::<dyn DynCast + Unpin>());
+/// assert!(obj.can_cast::<dyn DynCast + Send + Unpin>());
+/// assert!(obj.can_cast::<dyn Any>());
+/// assert!(obj.can_cast::<dyn Any + Send>());
+/// assert!(obj.can_cast::<dyn Any + Unpin>());
+/// assert!(obj.can_cast::<dyn Any + Send + Unpin>());
+///
+/// // But not, for example, this type, which was absent from the declaration:
+/// assert!(!obj.can_cast::<dyn Trait2>());
+/// ```
+///
+/// ## 2. Declaring many base traits
+/// ```
+/// # use untitled::util::dyn_cast::{DynCast, DynCastExt};
+/// # use untitled::DynCast; // this macro
+///
+/// struct Struct2 { /* ... */ }
+/// # trait Trait1 { /* ... */ }
+/// # trait Trait2 { /* ... */ }
+/// trait Trait3 { /* ... */ }
+/// trait Trait4 { /* ... */ }
+/// impl Trait1 for Struct2 { /* ... */ }
+/// impl Trait2 for Struct2 { /* ... */ }
+/// impl Trait3 for Struct2 { /* ... */ }
+/// impl Trait4 for Struct2 { /* ... */ }
+/// DynCast!(Struct2, base_traits(Trait1, Trait2, Trait3, Trait4));
+///
+/// let obj = &(Struct2 { /* ... */ }) as &dyn DynCast;
+///
+/// // `obj` can be cast to any of these types...
+/// assert!(obj.can_cast::<dyn Trait1>());
+/// assert!(obj.can_cast::<dyn Trait2>());
+/// assert!(obj.can_cast::<dyn Trait3>());
+/// assert!(obj.can_cast::<dyn Trait4>());
+/// // ...among others.
+/// ```
+/// [trait object]: https://doc.rust-lang.org/reference/types/trait-object.html
+/// [auto trait]: https://doc.rust-lang.org/reference/special-types-and-traits.html#auto-traits
+/// [`Any`]: std::any::Any
 #[macro_export]
 macro_rules! DynCast {
     // INPUT: when `auto_traits` is not specified, set its default value.
@@ -173,8 +268,4 @@ macro_rules! DynCast {
             }
         }
     };
-}
-
-macro_rules! doc {
-    ($($x:expr)*; $i:item) => { $(#[doc=$x])* $i };
 }

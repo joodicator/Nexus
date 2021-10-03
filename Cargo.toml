@@ -1,7 +1,8 @@
-[package]
-name = "untitled"
-version = "2.1.0"
-authors = ["joodicator <john.macinroe@gmail.com>"]
-edition = "2018"
-
-[dependencies]
+[workspace]
+members = [
+    "nxs_interface",
+    "nxs_interface_macros",
+    "nxs_std_root",
+    "nxs_std_text",
+    "nxs_std_cmds",
+]

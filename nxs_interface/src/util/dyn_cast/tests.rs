@@ -1,7 +1,22 @@
 #![cfg(test)]
+#![cfg(feature = "derive")]
 
-use super::*;
-use crate::DynCast;
+use std::collections::HashSet;
+use std::iter::FromIterator;
+use std::any::{Any, TypeId};
+use std::rc::Rc;
+use std::sync::Arc;
+
+use crate::util::dyn_cast::{self, DynCast, DynCastExt};
+
+macro_rules! test_castable_types {
+    ($value:ident, types($($type:ty,)*)) => {
+        assert_eq!(
+            HashSet::<TypeId>::from_iter($value.castable_types()),
+            HashSet::<TypeId>::from_iter([$(TypeId::of::<$type>()),*]),
+        );
+    }
+}
 
 macro_rules! test_not_cast_borrowed {
     ($value:ident, $cast:ident, $Struct:ident, types($($type:ty,)*)) => {$(
@@ -52,21 +67,31 @@ macro_rules! test_cast_owned_any {
 
 #[test]
 fn derive_dyncast_default() {
-    //! Deriving `DynCast` with an empty list of base traits and no list of
-    //! auto traits specified should leave `Self`, `dyn Any`, `dyn Ant + Send`,
-    //! `dyn Any + Sync`, and `dyn Any + Send + Sync` as the only traits
-    //! castable to.
+    //! Deriving `DynCast` with no base traits or auto traits specified should
+    //! leave `Self`, `dyn Any`, `dyn DynCast`, and the latter two with any
+    //! combination of `Sync` and/or `Send`, as the only traits castable to.
 
     trait Empty {}
+
+    #[derive(DynCast)]
+    #[dyn_cast(path(dyn_cast))]
     struct Struct;
-    DynCast!(Struct, base_traits());
+
+    // castable_types
+    let struct_ref = &Struct as &dyn DynCast;
+    test_castable_types!(struct_ref, types(
+        Struct, dyn Any, dyn Any + Sync, dyn Any + Send, dyn Any + Sync + Send,
+        dyn DynCast, dyn DynCast + Sync, dyn DynCast + Send,
+        dyn DynCast + Sync + Send,
+    ));
 
     // cast_ref
-    let struct_ref = &Struct as &dyn DynCast;
     test_not_cast_borrowed!(struct_ref, cast_ref, Struct, types(dyn Empty,));
     test_cast_borrowed!(struct_ref, cast_ref, Struct, types(Struct,));
     test_cast_borrowed_any!(struct_ref, cast_ref, Struct, types(
-        dyn Any, dyn Any + Send, dyn Any + Sync, dyn Any + Send + Sync,
+        dyn Any, dyn Any + Sync, dyn Any + Send, dyn Any + Sync + Send,
+        dyn DynCast, dyn DynCast + Sync, dyn DynCast + Send,
+        dyn DynCast + Sync + Send,
     ));
 
     // cast_mut
@@ -75,7 +100,9 @@ fn derive_dyncast_default() {
     test_not_cast_borrowed!(struct_mut, cast_mut, Struct, types(dyn Empty,));
     test_cast_borrowed!(struct_mut, cast_mut, Struct, types(Struct,));
     test_cast_borrowed_any!(struct_mut, cast_mut, Struct, types(
-        dyn Any, dyn Any + Send, dyn Any + Sync, dyn Any + Send + Sync,
+        dyn Any, dyn Any + Sync, dyn Any + Send, dyn Any + Sync + Send,
+        dyn DynCast, dyn DynCast + Sync, dyn DynCast + Send,
+        dyn DynCast + Sync + Send,
     ));
 
     // cast_box
@@ -85,7 +112,9 @@ fn derive_dyncast_default() {
     test_not_cast_owned!(Box, cast_box, Struct, types(dyn Empty,));
     test_cast_owned!(Box, cast_box, Struct, types(Struct,));
     test_cast_owned_any!(Box, cast_box, Struct, types(
-        dyn Any, dyn Any + Send, dyn Any + Sync, dyn Any + Send + Sync,
+        dyn Any, dyn Any + Sync, dyn Any + Send, dyn Any + Sync + Send,
+        dyn DynCast, dyn DynCast + Sync, dyn DynCast + Send,
+        dyn DynCast + Sync + Send,
     ));
 
     // cast_rc
@@ -94,7 +123,9 @@ fn derive_dyncast_default() {
     test_not_cast_owned!(Rc, cast_rc, Struct, types(dyn Empty,));
     test_cast_owned!(Rc, cast_rc, Struct, types(Struct,));
     test_cast_owned_any!(Rc, cast_rc, Struct, types(
-        dyn Any, dyn Any + Send, dyn Any + Sync, dyn Any + Send + Sync,
+        dyn Any, dyn Any + Sync, dyn Any + Send, dyn Any + Sync + Send,
+        dyn DynCast, dyn DynCast + Sync, dyn DynCast + Send,
+        dyn DynCast + Sync + Send,
     ));
 
     // cast_arc
@@ -103,27 +134,35 @@ fn derive_dyncast_default() {
     test_not_cast_owned!(Arc, cast_arc, Struct, types(dyn Empty,));
     test_cast_owned!(Arc, cast_arc, Struct, types(Struct,));
     test_cast_owned_any!(Arc, cast_arc, Struct, types(
-        dyn Any, dyn Any + Send, dyn Any + Sync, dyn Any + Send + Sync,
+        dyn Any, dyn Any + Sync, dyn Any + Send, dyn Any + Sync + Send,
+        dyn DynCast, dyn DynCast + Sync, dyn DynCast + Send,
+        dyn DynCast + Sync + Send,
     ));
 }
 
 #[test]
 fn derive_dyncast_minimal() {
     //! Deriving `DynCast` with empty lists of base traits and auto traits
-    //! should leave `Self` and `dyn Any` as the only types castable to.
-    //! In particular, `dyn Any + Send + Sync` should not be castable to, so
-    //! that any cast from an `Arc` pointer should fail.
+    //! should leave `Self`, `dyn Any` and `dyn DynCast` as the only types
+    //! castable to. In particular, `dyn Any + Send + Sync` should not be
+    //! castable to, so that any cast from an `Arc` pointer should fail.
 
+    #[derive(DynCast)]
+    #[dyn_cast(base_traits(), auto_traits(), path(dyn_cast))]
     struct Struct;
-    DynCast!(Struct, base_traits(), auto_traits());
+
+    // castable_types
+    let struct_ref = &Struct as &dyn DynCast;
+    test_castable_types!(struct_ref, types(Struct, dyn Any, dyn DynCast,));
 
     // cast_ref
-    let struct_ref = &Struct as &dyn DynCast;
     test_not_cast_borrowed!(struct_ref, cast_ref, Struct, types(
         dyn Any + Send, dyn Any + Sync, dyn Any + Send + Sync,
     ));
     test_cast_borrowed!(struct_ref, cast_ref, Struct, types(Struct,));
-    test_cast_borrowed_any!(struct_ref, cast_ref, Struct, types(dyn Any,));
+    test_cast_borrowed_any!(struct_ref, cast_ref, Struct, types(
+        dyn Any, dyn DynCast,
+    ));
 
     // cast_arc
     test_not_cast_owned!(Arc, cast_arc, Struct, types(
@@ -142,15 +181,22 @@ fn derive_dyncast_minimal() {
 #[test]
 fn derive_dyncast_custom() {
     trait Trait {}
+
+    #[derive(DynCast)]
+    #[dyn_cast(base_traits(Trait), auto_traits(Unpin), path(dyn_cast))]
     struct Struct;
     impl Trait for Struct {}
-    DynCast!(Struct, base_traits(Trait), auto_traits(Unpin));
  
     let struct_ref = &Struct as &dyn DynCast;
     test_not_cast_borrowed!(struct_ref, cast_ref, Struct, types(
         dyn Any + Send, dyn Any + Sync, dyn Trait + Send, dyn Trait + Sync,
     ));
     test_cast_borrowed!(struct_ref, cast_ref, Struct, types(
-        dyn Trait, dyn Trait + Unpin, dyn Any, dyn Any + Unpin, 
+        Struct, dyn Any, dyn Any + Unpin, dyn DynCast, dyn DynCast + Unpin,
+        dyn Trait, dyn Trait + Unpin,
+    ));
+    test_castable_types!(struct_ref, types(
+        Struct, dyn Any, dyn Any + Unpin, dyn DynCast, dyn DynCast + Unpin,
+        dyn Trait, dyn Trait + Unpin,
     ));
 }

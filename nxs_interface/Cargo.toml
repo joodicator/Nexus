@@ -1,0 +1,19 @@
+[package]
+name = "nxs_interface"
+version = "0.1.0"
+edition = "2018"
+
+[features]
+derive = ["nxs_interface_macros"]
+util = []
+root = ["util", "futures"]
+text = ["root"]
+
+[dependencies]
+nxs_interface_macros = { path = "../nxs_interface_macros", optional = true }
+
+[dependencies.futures]
+version = "0.3"
+features = ["std"]
+default-features = false
+optional = true

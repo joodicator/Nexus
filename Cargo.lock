@@ -101,7 +101,6 @@ dependencies = [
 name = "nxs_interface_macros"
 version = "0.1.0"
 dependencies = [
- "nxs_interface",
  "parse-display",
  "proc-macro2",
  "quote",

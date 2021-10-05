@@ -7,7 +7,7 @@ use std::any::{Any, TypeId};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::util::dyn_cast::{self, DynCast, DynCastExt};
+use crate::util::dyn_cast::{DynCast, DynCastExt};
 
 macro_rules! test_castable_types {
     ($value:ident, types($($type:ty,)*)) => {
@@ -74,7 +74,7 @@ fn derive_dyncast_default() {
     trait Empty {}
 
     #[derive(DynCast)]
-    #[dyn_cast(path(dyn_cast))]
+    #[dyn_cast(crate(crate))]
     struct Struct;
 
     // castable_types
@@ -148,7 +148,7 @@ fn derive_dyncast_minimal() {
     //! castable to, so that any cast from an `Arc` pointer should fail.
 
     #[derive(DynCast)]
-    #[dyn_cast(base_traits(), auto_traits(), path(dyn_cast))]
+    #[dyn_cast(base_traits(), auto_traits(), crate(crate))]
     struct Struct;
 
     // castable_types
@@ -183,7 +183,7 @@ fn derive_dyncast_custom() {
     trait Trait {}
 
     #[derive(DynCast)]
-    #[dyn_cast(base_traits(Trait), auto_traits(Unpin), path(dyn_cast))]
+    #[dyn_cast(base_traits(Trait), auto_traits(Unpin), crate(crate))]
     struct Struct;
     impl Trait for Struct {}
  

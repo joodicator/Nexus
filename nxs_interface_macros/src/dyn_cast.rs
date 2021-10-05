@@ -7,7 +7,7 @@ use std::str::FromStr;
 use proc_macro2::TokenStream;
 use syn::{
     Error, DeriveInput, Path, Attribute, Ident, Meta, NestedMeta, Type,
-    parse2 as parse, parse_quote as pq, 
+    MetaList, parse2 as parse, parse_quote as pq, 
 };
 use quote::{quote as q, ToTokens, TokenStreamExt};
 use parse_display::FromStr;
@@ -36,23 +36,6 @@ impl ToTokens for AutoTrait {
     }
 }
 
-struct Options {
-    // The traits which may serve as the single *base trait* of a trait object
-    // type to which dynamic casting is enabled.
-    base_traits: HashSet<Path>,
-
-    // The traits which may occur in the zero or more *auto traits* of a trait
-    // object type to which dynamic casting is enabled.
-    auto_traits: HashSet<AutoTrait>,
-
-    // The path at which the module `dyn_cast` containing the trait `DynCast`
-    // can be found; usually `::nxs_interface::util::dyn_cast`, but in some
-    // special cases, such as when the macro is invoked from within the
-    // `nxs_interface` crate, or from a crate that doesn't directly import
-    // `nxs_interface`, a different path is needed.
-    dyn_cast_path: Path,
-}
-
 pub fn derive(input: TokenStream) -> syn::Result<TokenStream> {
     #![allow(non_snake_case)]
     let DeriveInput{ attrs, ident, generics, .. } = parse(input)?;
@@ -60,22 +43,30 @@ pub fn derive(input: TokenStream) -> syn::Result<TokenStream> {
         = static_impl_generics(generics.split_for_impl());
     let impl_type = q!(#ident#type_gen);
 
-    // Read options from any relevant helper attributes:
-    let mut options = PartialOptions::default();
-    for attr in attrs { read_attr(attr, &mut options)?; }
-    let Options{ mut base_traits, auto_traits, dyn_cast_path } = options.into();
+    // Extract options from helper attributes:
+    let mut base_traits: HashSet<Path> = HashSet::new();
+    let mut auto_traits: Option<HashSet<AutoTrait>> = None;
+    let mut crate_path: Option<Path> = None;
+    for attr in attrs {
+        read_attr(attr, &mut base_traits, &mut auto_traits, &mut crate_path)?;
+    }
+    let auto_traits = auto_traits.unwrap_or_else(|| HashSet::from_iter([
+        AutoTrait::Send, AutoTrait::Sync
+    ]));
+    let crate_path = crate_path.unwrap_or_else(|| pq!(::nxs_interface));
 
     // For later convenience, define the absolute paths of some common items:
-    let DynCast: Path = pq!(#dyn_cast_path::DynCast);
-    let Send: Path    = pq!(::std::marker::Send);
-    let Sync: Path    = pq!(::std::marker::Sync);
-    let Any: Path     = pq!(::std::any::Any);
-    let TypeId: Type  = pq!(::std::any::TypeId);
-    let Option: Type  = pq!(::std::option::Option);
-    let Vec: Type     = pq!(::std::vec::Vec);
-    let Box: Type     = pq!(::std::boxed::Box);
-    let Rc: Type      = pq!(::std::rc::Rc);
-    let Arc: Type     = pq!(::std::sync::Arc);
+    let dyn_cast: Path = pq!(#crate_path::util::dyn_cast);
+    let DynCast: Path  = pq!(#dyn_cast::DynCast);
+    let Send: Path     = pq!(::std::marker::Send);
+    let Sync: Path     = pq!(::std::marker::Sync);
+    let Any: Path      = pq!(::std::any::Any);
+    let TypeId: Type   = pq!(::std::any::TypeId);
+    let Option: Type   = pq!(::std::option::Option);
+    let Vec: Type      = pq!(::std::vec::Vec);
+    let Box: Type      = pq!(::std::boxed::Box);
+    let Rc: Type       = pq!(::std::rc::Rc);
+    let Arc: Type      = pq!(::std::sync::Arc);
 
     // Ensure that `Any` and `DynCast` are among the base traits:
     base_traits.extend([Any.clone(), DynCast.clone()]);
@@ -149,19 +140,19 @@ pub fn derive(input: TokenStream) -> syn::Result<TokenStream> {
     let impl_dyn_cast_methods = [
         cast_meth!(
             q!(dyn_cast_ref), |t, l| q!(&#l (#t)), q!(downcast_ref),
-            q!(dyn #Any + 'static), |l| q!(#dyn_cast_path::DynCastRef<#l>),
+            q!(dyn #Any + 'static), |l| q!(#dyn_cast::DynCastRef<#l>),
         ),
         cast_meth!(
             q!(dyn_cast_mut), |t, l| q!(&#l mut(#t)), q!(downcast_mut),
-            q!(dyn #Any + 'static), |l| q!(#dyn_cast_path::DynCastMut<#l>),
+            q!(dyn #Any + 'static), |l| q!(#dyn_cast::DynCastMut<#l>),
         ),
         cast_meth!(
             q!(dyn_cast_box), |t, _| q!(#Box<#t>), q!(downcast),
-            q!(dyn #Any + 'static), |_| q!(#dyn_cast_path::DynCastBox),
+            q!(dyn #Any + 'static), |_| q!(#dyn_cast::DynCastBox),
         ),
         cast_meth!(
             q!(dyn_cast_rc), |t, _| q!(#Rc<#t>), q!(downcast),
-            q!(dyn #Any + 'static), |_| q!(#dyn_cast_path::DynCastRc),
+            q!(dyn #Any + 'static), |_| q!(#dyn_cast::DynCastRc),
         ),
     ];
 
@@ -173,14 +164,14 @@ pub fn derive(input: TokenStream) -> syn::Result<TokenStream> {
         cast_meth!(
             q!(dyn_cast_arc), |t, _| q!(#Arc<#t>), q!(downcast),
             q!(dyn #Any + #Sync + #Send + 'static),
-            |_| q!(#dyn_cast_path::DynCastArc),
+            |_| q!(#dyn_cast::DynCastArc),
         )
     } else {q!{
         // Otherwise, no such casting is possible, so generate a method
         // that always fails to cast.
         fn dyn_cast_arc(
             self: #Arc<Self>, to: #TypeId
-        ) -> #Option<#dyn_cast_path::DynCastArc> {
+        ) -> #Option<#dyn_cast::DynCastArc> {
             None
         }
     }};
@@ -201,79 +192,82 @@ pub fn derive(input: TokenStream) -> syn::Result<TokenStream> {
     Ok(output)
 }
 
-// A set of `Options` which has not yet been fully computed.
-#[derive(Default)]
-struct PartialOptions {
-    base_traits: Option<HashSet<Path>>,
-    auto_traits: Option<HashSet<AutoTrait>>,
-    dyn_cast_path: Option<Path>,
-}
+const ATTR_ERR: &str = "Invalid arguments to the `dyn_cast` attribute.";
 
-// Completion of `PartialOptions` with default values.
-impl From<PartialOptions> for Options {
-    fn from(partial: PartialOptions) -> Self {
-        Self {
-            base_traits: partial.base_traits.unwrap_or_else(HashSet::new),
-            auto_traits: partial.auto_traits.unwrap_or_else(
-                || HashSet::from_iter([AutoTrait::Send, AutoTrait::Sync])
-            ),
-            dyn_cast_path: partial.dyn_cast_path.unwrap_or_else(
-                || pq!(::nxs_interface::util::dyn_cast)
-            ),
-        }
-    }
-}
-
-// Update a partial set of options based on a single helper attribute.
 fn read_attr(
     attr: Attribute,
-    PartialOptions {
-        base_traits, auto_traits, dyn_cast_path,
-    }: &mut PartialOptions,
+    base_traits: &mut HashSet<Path>,
+    auto_traits: &mut Option<HashSet<AutoTrait>>,
+    crate_path: &mut Option<Path>,
 ) -> syn::Result<()> {
-    let name = attr.path.get_ident().map(Ident::to_string);
-    if name.as_deref() != Some("dyn_cast") { return Ok(()); }
-
-    const ARG_ERR: &str = "Invalid argument(s) to `dyn_cast` attribute.";
-    let list = if let Meta::List(list) = attr.parse_meta()? { list }
-               else { Err(Error::new_spanned(attr, ARG_ERR))? };
-
+    if !attr.path.is_ident("dyn_cast") { return Ok(()); }
+    let list = if let Meta::List(ls) = attr.parse_meta()? { Ok(ls) }
+               else { Err(Error::new_spanned(attr, ATTR_ERR)) }?;
     for item in list.nested {
-        let list = if let NestedMeta::Meta(Meta::List(list)) = item { list }
-                   else { return Err(Error::new_spanned(item, ARG_ERR)) };
+        let meta = if let NestedMeta::Meta(mt) = item { Ok(mt) }
+                   else { Err(Error::new_spanned(item, ATTR_ERR)) }?;
+        let name = meta.path().get_ident().map(Ident::to_string);
+        match (name.as_deref(), meta) {
+            (Some("base_traits"), Meta::List(list)) => {
+                read_base_traits(list, base_traits)
+            }
+            (Some("auto_traits"), Meta::List(list)) => {
+                read_auto_traits(list, auto_traits)
+            }
+            (Some("crate"), Meta::List(list)) if list.nested.len() == 1 => {
+                read_crate_path(list, crate_path)
+            }
+            (_, mt) => Err(Error::new_spanned(mt, ATTR_ERR)),
+        }?
+    }
+    Ok(())
+}
 
-        let mut paths = list.nested.clone().into_iter().map(|item| match item {
-            NestedMeta::Meta(Meta::Path(path)) => Ok(path),
-            _ => Err(Error::new_spanned(item, ARG_ERR)),
-        });
-
-        match list.path.get_ident().map(Ident::to_string) {
-            Some(s) if s == "base_traits" => {
-                let base_traits = base_traits.get_or_insert_with(HashSet::new);
-                for path_result in paths {
-                    base_traits.insert(path_result?);
-                }
+fn read_base_traits(
+    list: MetaList,
+    base_traits: &mut HashSet<Path>,
+) -> syn::Result<()> {
+    for item in list.nested {
+        match item {
+            NestedMeta::Meta(Meta::Path(path)) => {
+                base_traits.insert(path);
             }
-            Some(s) if s == "auto_traits" => {
-                let auto_traits = auto_traits.get_or_insert_with(HashSet::new);
-                for path_result in paths {
-                    let path = path_result?;
-                    let atrait = path.get_ident().map(Ident::to_string)
-                        .and_then(|s| AutoTrait::from_str(s.as_str()).ok())
-                        .ok_or_else(|| Error::new_spanned(path, ARG_ERR))?;
-                    auto_traits.insert(atrait);
-                }
-            }
-            Some(s) if s == "path" => {
-                match (paths.next(), paths.next()) {
-                    (Some(path_result), None) if dyn_cast_path.is_none() => {
-                        *dyn_cast_path = Some(path_result?);
-                    }
-                    _ => return Err(Error::new_spanned(list, ARG_ERR))
-                }
-            }
-            _ => return Err(Error::new_spanned(list.path, ARG_ERR)),
+            _ => return Err(Error::new_spanned(item, ATTR_ERR)),
         }
+    }
+    Ok(())
+}
+
+fn read_auto_traits(
+    list: MetaList,
+    auto_traits: &mut Option<HashSet<AutoTrait>>,
+) -> syn::Result<()> {
+    let auto_traits = auto_traits.get_or_insert_with(HashSet::new);
+    for item in list.nested {
+        match item {
+            NestedMeta::Meta(Meta::Path(path)) => {
+                let auto_trait = path.get_ident().map(Ident::to_string)
+                    .and_then(|s| AutoTrait::from_str(s.as_str()).ok())
+                    .ok_or_else(|| Error::new_spanned(path, ATTR_ERR))?;
+                auto_traits.insert(auto_trait);
+            }
+            _ => return Err(Error::new_spanned(item, ATTR_ERR)),
+        }
+    }
+    Ok(())
+}
+
+fn read_crate_path (
+    list: MetaList,
+    crate_path: &mut Option<Path>,
+) -> syn::Result<()> {
+    const PATH_ERR: &str = "`path` may not be specified more than once.";
+    match (&crate_path, list.nested.into_iter().next()) {
+        (None, Some(NestedMeta::Meta(Meta::Path(path)))) => {
+            *crate_path = Some(path);
+        }
+        (None, nm) => return Err(Error::new_spanned(nm, ATTR_ERR)),
+        (_,    nm) => return Err(Error::new_spanned(nm, PATH_ERR)),
     }
     Ok(())
 }
